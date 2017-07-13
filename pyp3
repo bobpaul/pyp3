@@ -1,8 +1,10 @@
-#!/usr/bin/env python 
-#version 2.11.30
+#!/usr/bin/env python3
+from __future__ import print_function, unicode_literals, absolute_import, division
+
+#version 2.13
 #author tobyrosen@gmail.com
 
-#Copyright (c) 2011,2012, Sony Pictures Imageworks
+#Copyright (c) 2011-2015 Toby Rosen
 #Distributed under the New BSD License.
 #All rights reserved.
 #Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
@@ -121,8 +123,8 @@ class HistoryObject(object):
     def __getattr__(self, name):
          return getattr(self.__wrapped, name)
 
-    def __lt__(self, other):
-        return self.__wrapped < other.__wrapped
+    def __cmp__(self, other):
+         return cmp(self.__wrapped, other)
 
     def __str__(self):
          return str(self.__wrapped)
@@ -248,12 +250,26 @@ class PowerPipeList(list,PowerPipeListCustom):
     def flatten_list(self, iterables):
         '''
         returns a list of strings from nested lists
-        @param iterables: nested lists containing strs or PypStrs
-        @type iterables: list
+        @param iterables: nested list to flatten
+        @type iterables: list<str>
         @return: unnested list of strings
         @rtype: list<str>
         '''
-        return self.pyp.flatten_list(iterables)
+        out = []
+        stack=[[iterables,0,len(iterables)]]
+        while stack:
+            curIter,pos,limit=stack[0]
+            if pos==limit:
+                stack.pop(0)
+                continue
+            if type(curIter[pos]) not in [str, PypStr]:
+                stack[0][1]+=1
+                stack.insert(0,[curIter[pos],0,len(curIter[pos])])
+            else:
+                out.append(curIter[pos])
+                stack[0][1]+=1
+
+        return out
 
     def unlist(self):
         '''
@@ -387,6 +403,46 @@ class PypStr(str,PypStrCustom):
 
         return PypStr(self)
 
+
+    def rekill(self, *args):
+        '''
+        replace each regex in args found in string with ''
+        @param args: regexes to remove
+        @type args: list<regex>
+        @return: string without the regexes
+        @rtype: PypStr
+        '''
+
+        for arg in args:
+            self = re.sub(arg, '', self)
+
+        return PypStr(self)
+
+    def rereplace(self, regex, replacement):
+        '''
+        replace instances of regex in string with replacement
+        @param regex: the regex to replace
+        @type regex: str
+        @param replacement: the value to insert
+        @type replacement: str
+        @return: String with all instances replaced
+        @rtype: PypStr
+        '''
+
+        self = re.sub(regex, replacement, self)
+
+        return PypStr(self)
+
+    def refindall(self, to_match):
+        '''
+        returns a list of all matches of to_match in the string
+        @param to_match: the regex to match
+        @type to_match: str
+        @return: a list of all matches
+        @rtype: PypList
+        '''
+        return PypList(re.findall(to_match, self))
+
     def letters(self):
         '''
         returns only letters
@@ -461,18 +517,6 @@ class PypStr(str,PypStrCustom):
             return PypStr(match.group(group))
         else:
             return ''
-
-    def rereplace(self, to_match, to_replace):
-        '''
-        returns this string, with all occurrences of the regex to_match replaced with to_replace
-        @return: this string, with regex-substitutions made
-        @rtype: PypStr
-        @param to_match: regex used for matching
-        @type to_match: str
-        @param to_replace: string to replace with - see re.sub for full syntax
-        @type to_replace: str
-        '''
-        return PypStr(re.sub(to_match, to_replace, self))
 
 
 class PypList(list,PypListCustom):
@@ -631,7 +675,7 @@ class Pyp(object):
            macros = {}
 
         for macro in macros: #unicode sucks
-            macros[macro]['command'] = [str(x) for x in macros[macro]['command'] ]
+            macros[macro][u'command'] = [str(x) for x in macros[macro][u'command'] ]
 
         return macros
 
@@ -700,11 +744,12 @@ class Pyp(object):
             macros_sorted.sort()
             for macro_name in macros_sorted:
                 if options.macro_list or options.macro_find_name in macro_name or options.macro_find_name in macros[macro_name]['user']:
-                    print(Colors.MAGENTA + macro_name + '\n\t ' + Colors.YELLOW+macros[macro_name]['user'] \
-                     + '\t' + macros[macro_name]['date']\
-                    +'\n\t\t' + Colors.OFF + '"'\
-                     + '|'.join(macros[macro_name]['command']) + '"' + Colors.GREEN + '\n\t\t'\
-                      + macros[macro_name].get('comments', '') + Colors.OFF + '\n')
+                    print(Colors.MAGENTA + macro_name + '\n\t ' + Colors.YELLOW+macros[macro_name]['user'] 
+                     + '\t' + macros[macro_name]['date']
+                     +'\n\t\t' + Colors.OFF + '"'
+                     + '|'.join(macros[macro_name]['command']) + '"' + Colors.GREEN + '\n\t\t'
+                     + macros[macro_name].get('comments', '') + Colors.OFF + '\n'
+                     )
             sys.exit()
 
     def load_file(self):
@@ -1293,7 +1338,7 @@ class Pyp(object):
             elif power_pipe ==   'fpp' and file_input:
                 user_output =  [file_input[n]]
             elif power_pipe: #  power pipe variable is referenced, but does not exist.
-                print(Colors.RED + "YOU'RE LIST VARIABLE DOES NOT EXIST: " + Colors.GREEN + power_pipe + Colors.OFF)
+                print(Colors.RED + "YOUR LIST VARIABLE DOES NOT EXIST: " + Colors.GREEN + power_pipe + Colors.OFF)
                 sys.exit()
         except: #default output is null per line
             user_output =['']
@@ -1782,6 +1827,8 @@ class Pyp(object):
             end_n = int(options.blank_inputs)
             for n in range(0,end_n):
                 pipe_input.append('')
+
+
 
 
         elif options.no_input:
@@ -2367,8 +2414,10 @@ class Docs():
                              the joining delimeter (default is "_")
         p.re(REGEX)          returns portion of string that matches REGEX regular
                              expression.
-        p.rereplace(REG,STR) find REG regular expression and replace with STR.
+        p.rekill(RE1,RE2...) removes matches of specified regexes
+        p.rereplace(RE,STR)  replaces all matches of RE with STR
                              this is more reliable than p.replace(p.re(REGEX),STR)
+        p.refindall(RE)      returns a list of all matches of regex RE
 
         p.dir                directory of path
         p.file               file name of path
